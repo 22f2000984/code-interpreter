@@ -8,8 +8,12 @@ from io import StringIO
 import traceback
 
 # Gemini
-from google import genai
-from google.genai import types
+# from google import genai
+# from google.genai import types
+
+import google.generativeai as genai
+from pydantic import BaseModel
+from typing import List
 
 # ---------------- App ----------------
 app = FastAPI(title="Code Interpreter with AI Error Analysis")
@@ -53,8 +57,45 @@ def execute_python_code(code: str) -> dict:
         sys.stdout = old_stdout
 
 # ---------------- AI Error Analysis (ONLY on error) ----------------
+# def analyze_error_with_ai(code: str, tb: str) -> List[int]:
+#     client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+#     prompt = f"""
+# Analyze the Python code and traceback below.
+# Identify the exact line number(s) in the CODE where the error occurred.
+
+# CODE:
+# {code}
+
+# TRACEBACK:
+# {tb}
+
+# Return only the line numbers.
+# """
+
+#     response = client.models.generate_content(
+#         model="gemini-2.0-flash-exp",
+#         contents=prompt,
+#         config=types.GenerateContentConfig(
+#             response_mime_type="application/json",
+#             response_schema=types.Schema(
+#                 type=types.Type.OBJECT,
+#                 properties={
+#                     "error_lines": types.Schema(
+#                         type=types.Type.ARRAY,
+#                         items=types.Schema(type=types.Type.INTEGER),
+#                     )
+#                 },
+#                 required=["error_lines"],
+#             ),
+#         ),
+#     )
+
+#     parsed = ErrorAnalysis.model_validate_json(response.text)
+#     return parsed.error_lines
+
 def analyze_error_with_ai(code: str, tb: str) -> List[int]:
-    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
     prompt = f"""
 Analyze the Python code and traceback below.
@@ -66,28 +107,20 @@ CODE:
 TRACEBACK:
 {tb}
 
-Return only the line numbers.
+Return only the line numbers as a JSON list under key "error_lines".
+Example:
+{{ "error_lines": [3] }}
 """
 
-    response = client.models.generate_content(
-        model="gemini-2.0-flash-exp",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=types.Schema(
-                type=types.Type.OBJECT,
-                properties={
-                    "error_lines": types.Schema(
-                        type=types.Type.ARRAY,
-                        items=types.Schema(type=types.Type.INTEGER),
-                    )
-                },
-                required=["error_lines"],
-            ),
-        ),
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        generation_config={"response_mime_type": "application/json"},
     )
 
-    parsed = ErrorAnalysis.model_validate_json(response.text)
+    response = model.generate_content(prompt)
+
+    data = response.candidates[0].content.parts[0].text
+    parsed = ErrorAnalysis.model_validate_json(data)
     return parsed.error_lines
 
 # ---------------- API Endpoint ----------------
